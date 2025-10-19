@@ -34,47 +34,217 @@ Serializable: Самый строгий уровень, предотвращае
  Модуль 1: Уровни изоляции и аномалии
  1. Read Committed vs Удаление:
 Создайте таблицу iso_test (id INT, data TEXT) и вставьте одну строку.
-В сеансе 1 начните транзакцию с уровнем READ COMMITTED и выполните SELECT * FROM iso_test;.
+student:~/postgresql-16.0$ sudo -u postgres psql -c "DROP TABLE IF EXISTS iso_test; CREATE TABLE iso_test (id INT PRIMARY KEY, data TEXT); INSERT INTO iso_test VALUES (1,'row1');"
+NOTICE:  table "iso_test" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+INSERT 0 1
+
+В сеансе 1 начните транзакцию с уровнем READ COMMITTED и выполните SELECT * FROM iso_test;
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+BEGIN
+postgres=*# SELECT * FROM iso_test;
+ id | data 
+----+------
+  1 | row1
+(1 row)
+postgres=*# ^Z
+
 В сеансе 2 удалите строку и зафиксируйте изменения (DELETE ...; COMMIT;).
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres -c "DELETE FROM iso_test WHERE id=1; COMMIT;"
+WARNING:  there is no transaction in progress
+DELETE 1
+COMMIT
+
 В сеансе 1 выполните тот же SELECT повторно. Сколько строк увидите? Завершите транзакцию в сеансе 1.
- 2. Repeatable Read vs Удаление:
- Повторите предыдущий эксперимент, но в сеансе 1 начните транзакцию с BEGIN
- ISOLATION LEVEL REPEATABLE READ;.
- Объясните разницу в результатах между двумя уровнями изоляции.
- 3. Создание таблицы в транзакции:
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres
+postgres=# SELECT * FROM iso_test;
+ id | data 
+----+------
+(0 rows)
+postgres=# COMMIT;
+WARNING:  there is no transaction in progress
+COMMIT
+postgres=# 
+
+2. Repeatable Read vs Удаление:
+Повторите предыдущий эксперимент, но в сеансе 1 начните транзакцию с BEGIN ISOLATION LEVEL REPEATABLE READ;.
+Объясните разницу в результатах между двумя уровнями изоляции.
+student:~/postgresql-16.0$ sudo -u postgres psql -c "INSERT INTO iso_test VALUES (1,'row1');"
+INSERT 0 1
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN
+postgres=*# SELECT * FROM iso_test;
+ id | data 
+----+------
+  1 | row1
+(1 row)
+postgres=*# ^Z
+
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres -c "DELETE FROM iso_test WHERE id=1; COMMIT;"
+WARNING:  there is no transaction in progress
+DELETE 1
+COMMIT
+
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres
+postgres=# SELECT * FROM iso_test;
+ id | data 
+----+------
+(0 rows)
+postgres=# COMMIT;
+WARNING:  there is no transaction in progress
+COMMIT
+postgres=# ^Z
+Объяснение: при REPEATABLE READ транзакция работает с одним снимком данных(snapshot), 
+взятым в момент BEGIN. Удаление, выполненное позже и зафиксированное, 
+невидимо этой транзакции до её завершения.
+
+3. Создание таблицы в транзакции:
  В сеансе 1 начните транзакцию и создайте новую таблицу new_table, вставьте в нее строку.
  Не фиксируйте.
  В сеансе 2 выполните SELECT * FROM new_table;. Что произойдет?
- Зафиксируйте транзакцию в сеансе 1. Повторите запрос в сеансе 2.
- Повторите процесс, но вместо фиксации откатите транзакцию в сеансе 1. Что изменилось?
- 4. Блокировка DDL:
- В сеансе 1 начните транзакцию и выполните SELECT * FROM iso_test; (даже если
- таблица пуста).
- Попытайтесь в сеансе 2 выполнить DROP TABLE iso_test;. Получится ли? Объясните,
- почему.
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres
+postgres=# BEGIN;
+BEGIN
+postgres=*# CREATE TABLE new_table (id INT);
+CREATE TABLE
+postgres=*# INSERT INTO new_table VALUES (1);
+INSERT 0 1
+postgres=*# ^Z
+
+student:~/postgresql-16.0$ sudo -u postgres psql -d postgres -c "SELECT * FROM new_table;"
+ERROR:  relation "new_table" does not exist
+LINE 1: SELECT * FROM new_table;
+в СЕАНСЕ 2 будет ошибка relation "new_table" does not exist, 
+потому что таблица создана в незавершённой транзакции и ещё не видна другим транзакциям.
 
 
+Зафиксируйте транзакцию в сеансе 1. Повторите запрос в сеансе 2.
+student:~/postgresql-16.0$ fg %14
+sudo -u postgres psql -d postgres
+           COMMIT;
+WARNING:  there is no transaction in progress
+COMMIT
 
-## Практическая часть
 
-### Модуль [номер]: [Название модуля]
+Повторите процесс, но вместо фиксации откатите транзакцию в сеансе 1. Что изменилось?
+student:~/postgresql-16.0$ fg %14
+sudo -u postgres psql -d postgres
+BEGIN;
+BEGIN
+postgres=*# CREATE TABLE new_table2 (id INT);
+CREATE TABLE
+postgres=*# INSERT INTO new_table2 VALUES (1);
+INSERT 0 1
+postgres=*# ROLLBACK;
+ROLLBACK
 
-#### Задача [номер]: [Название задачи]
-**Цель:** [Цель задачи]
-
-**Выполненные действия:**
-```sql
--- SQL-команды, выполненные в задании
-SELECT * FROM example_table;
-```
-
-**Результаты:**
-```bash
-# Вывод команд и результаты
+Объяснение: создание таблицы внутри транзакции — транзакционная операция;
+пока транзакция не зафиксирована, объект не виден другим транзакциям; 
+ROLLBACK отменяет создание.
+ 
+4. Блокировка DDL:
+ В сеансе 1 начните транзакцию и выполните SELECT * FROM iso_test; (даже если таблица пуста).
+ Попытайтесь в сеансе 2 выполнить DROP TABLE iso_test;. Получится ли? Объясните, почему.
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN;
+BEGIN
+postgres=*# SELECT * FROM iso_test;
  id | data 
 ----+------
-  1 | test
-```
+(0 rows)
+postgres=*# 
+
+student:~$ sudo -u postgres psql -d postgres -c "DROP TABLE iso_test;"
+
+Результат: DROP TABLE будет ждать или упадёт с сообщением о блокировке, 
+в зависимости от типа блокировки и версии — чаще будет ждать, 
+потому что DROP требует эксклюзивной блокировки,
+которую не может получить пока есть активная транзакция, держащая shared lock.
+
+Объяснение: DDL требует эксклюзивной блокировки; 
+существующие транзакции, которые читают таблицу, 
+мешают DROP — поэтому DROP либо блокируется до завершения других транзакций, 
+либо выдаёт ошибку при попытке форсировать.
+
+Модуль 2: Фантомное чтение и снимки
+
+1. Фантомное чтение (Read Committed):
+Создайте пустую таблицу phantom_test (id INT).
+Продемонстрируйте на уровне Read Committed, что аномалия "фантомное чтение" не
+предотвращается (вставка новых строк в другом сеансе становится видимой).
+student:~$ sudo -u postgres psql -d postgres -c "DROP TABLE IF EXISTS phantom_test; CREATE TABLE phantom_test (id INT); INSERT INTO phantom_test VALUES (1),(2),(3);"
+NOTICE:  table "phantom_test" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+INSERT 0 3
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+BEGIN
+postgres=*# SELECT count(*) FROM phantom_test;
+ count 
+-------
+     3
+(1 row)
+
+student:~$ sudo -u postgres psql -d postgres -c "INSERT INTO phantom_test VALUES (4); COMMIT;"
+WARNING:  there is no transaction in progress
+INSERT 0 1
+COMMIT
+student:~$ 
+
+postgres=*# SELECT count(*) FROM phantom_test;
+ count 
+-------
+     4
+(1 row)
+
+postgres=*# COMMIT;
+COMMIT
+
+Объяснение: в Read Committed каждый SELECT видит актуальные изменения,
+поэтому вставка в другом сеансе становится видна — феномен фантомного чтения.
+
+2. Невидимость удалений (Repeatable Read):
+В сеансе 1 начните транзакцию с уровнем Repeatable Read (пока без запросов).
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN
+postgres=*# 
+
+В сеансе 2 удалите все строки из phantom_test и зафиксируйте.
+student:~$ sudo -u postgres psql -d postgres -c "DELETE FROM phantom_test; COMMIT;"
+WARNING:  there is no transaction in progress
+DELETE 4
+COMMIT
+
+В сеансе 1 выполните SELECT * FROM phantom_test;. Увидятся ли удаленные строки?
+Выполните в сеансе 1 запрос SELECT * FROM pg_database; (не касаясь phantom_test).
+Повлияет ли это на видимость строк в phantom_test при последующем запросе?
+postgres=*# SELECT * FROM phantom_test;
+ id 
+----
+(0 rows)
+
+postgres=*# SELECT * FROM pg_database;
+postgres=# SELECT * FROM phantom_test;
+ id 
+----
+(0 rows)
+
+postgres=# COMMIT;
+WARNING:  there is no transaction in progress
+COMMIT
+
+Объяснение: Repeatable Read использует снимок, взятый при BEGIN;
+другие транзакционные действия не меняют видимость для этой транзакции.
+Выполнение других запросов (pg_database) не меняет её снимок.
+
+
+3. Транзакционность DDL: Убедитесь, что DROP TABLE является транзакционной операцией (можно
+откатить)
 
 **Выводы и объяснения:**
 [Ответ на вопрос "объясните", "почему", "сколько" из задания]
