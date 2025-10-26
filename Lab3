@@ -377,6 +377,149 @@ COMMIT
 позволяя продолжить транзакцию вместо полного её разрушения.
 
 
+Модуль 4: Снимки данных (Snapshots)
+1. Видимость удаленной строки:
+Воспроизведите ситуацию, при которой одна транзакция (A) видит строку, а другая (B),
+начавшаяся позже, — уже нет (строка удалена и зафиксирована после начала A, но до начала B).
+Используйте функции pg_current_snapshot() и pg_snapshot_xip(pg_current_snapshot()) для анализа снимков обеих транзакций.
+Изучите значения xmin и xmax удаленной строки. Объясните разницу в видимости на основе анализа снимков.
+
+Сеанс 1:
+student:~$ sudo -u postgres psql -d postgres -c "DROP TABLE IF EXISTS snap_test; CREATE TABLE snap_test (id INT); INSERT INTO snap_test VALUES (1);"
+DROP TABLE
+CREATE TABLE
+INSERT 0 1
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN
+postgres=*# SELECT * FROM snap_test;
+ id 
+----
+  1
+(1 row)
+
+postgres=*# SELECT pg_current_snapshot();
+ pg_current_snapshot 
+---------------------
+ 793:810:793
+(1 row)
+
+Сеанс 2:
+student:~$ sudo -u postgres psql -d postgres -c "DELETE FROM snap_test; COMMIT;"
+WARNING:  there is no transaction in progress
+DELETE 1
+COMMIT
+
+Сеанс 1:
+postgres=*# SELECT * FROM snap_test;
+ id 
+----
+  1
+(1 row)
+
+postgres=*# SELECT pg_snapshot_xip(pg_current_snapshot());
+ pg_snapshot_xip 
+-----------------
+             793
+(1 row)
+
+postgres=*# SELECT ctid, xmin, xmax FROM snap_test;
+ ctid  | xmin | xmax 
+-------+------+------
+ (0,1) |  809 |  810
+(1 row)
+
+postgres=*# COMMIT;
+COMMIT
+postgres=# 
+
+Объяснение: транзакция A имела снимок до удаления, поэтому видит строку; 
+транзакция B, начавшаяся после A, видит уже удалённую строку как отсутствующую. 
+pg_current_snapshot() возвращает snapshot id; pg_snapshot_xip(...) позволяет увидеть XIDs,
+входящие в снимок (в каких транзакциях видимо что).
+
+
+2. Снимки в функциях:
+Создайте функцию STABLE, возвращающую данные из таблицы.
+Исследуйте, какой снимок данных используется для запроса внутри этой функции при
+разных уровнях изоляции (Read Committed и Repeatable Read). Повторите для функции VOLATILE.
+Объясните разницу в поведении.
+
+postgres=# CREATE OR REPLACE FUNCTION fn_stable() RETURNS int AS $$
+BEGIN
+  RETURN (SELECT count(*) FROM snap_test);
+END;
+postgres$# $$ LANGUAGE plpgsql STABLE;
+CREATE FUNCTION
+postgres=# CREATE OR REPLACE FUNCTION fn_volatile() RETURNS int AS $$
+BEGIN
+  RETURN (SELECT count(*) FROM snap_test);
+END;
+postgres$# $$ LANGUAGE plpgsql VOLATILE;
+CREATE FUNCTION
+postgres=# 
+
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED;
+BEGIN
+postgres=*# SELECT fn_stable();
+ fn_stable 
+-----------
+         0
+(1 row)
+
+postgres=*# SELECT fn_volatile();
+ fn_volatile 
+-------------
+           0
+(1 row)
+
+postgres=*# COMMIT;
+COMMIT
+
+Объяснение:
+STABLE гарантирует, что функция при одном запросе даёт детерминированные результаты 
+и может кэшировать некоторые вещи в пределах одного запроса; 
+при Repeatable Read она действует в контексте снимка транзакции.
+
+VOLATILE выполняется заново при каждом обращении и не делает предположений; 
+снимок используется согласно правилам уровня изоляции запроса/транзакции —
+поведение может отличаться.
+
+3. Экспорт/импорт снимка:
+В транзакции 1 (уровень Repeatable Read) экспортируйте снимок данных с помощью pg_export_snapshot().
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN
+postgres=*# SELECT pg_export_snapshot();
+ pg_export_snapshot  
+---------------------
+ 0000000B-0000009F-1
+(1 row)
+
+В транзакции 2 измените какие-либо данные и зафиксируйте.
+student:~$ sudo -u postgres psql -d postgres -c "INSERT INTO snap_test VALUES (999); COMMIT;"
+WARNING:  there is no transaction in progress
+INSERT 0 1
+COMMIT
+student:~$ 
+
+В транзакции 3 импортируйте снимок из транзакции 1 (SET TRANSACTION SNAPSHOT '...';). 
+Убедитесь, что в транзакции 3 видны данные в состоянии на момент экспорта
+снимка, до изменений из транзакции 2
+student:~$ sudo -u postgres psql -d postgres
+postgres=# BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+BEGIN
+postgres=# SET TRANSACTION SNAPSHOT '0000000B-0000009F-1';
+WARNING:  SET TRANSACTION can only be used in transaction blocks
+ERROR:  a snapshot-importing transaction must have isolation level SERIALIZABLE or REPEATABLE READ
+postgres=# SELECT * FROM snap_test;
+ id  
+-----
+ 999
+(1 row)
+Объяснение: экспортированный снимок позволяет в другом сеансе «пересмотреть» данные так,
+как они выглядели в момент экспорта. 
+Это полезно для параллельной консистентной выборки больших объёмов.
 
 
 ## Результаты выполнения
