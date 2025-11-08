@@ -1,0 +1,455 @@
+```markdown
+Отчет по лабораторной работе №4
+Организация данных и системный каталог
+
+2025-10-19
+4 курс 1 полугодие 
+Пиж-б-о-22-1
+Администрирование баз данных
+Хетагуров Тамерлан Аланович
+
+Цель работы: Всестороннее изучение механизмов очистки (VACUUM) в PostgreSQL. Получение
+ практических навыков управления ручной и автоматической очисткой, анализа работы HOT
+обновлений, исследования влияния очистки на размер таблиц и индексов, а также работы с
+ заморозкой версий строк.
+
+Теоретическая часть:
+Очистка (VACUUM): Удаляет мертвые версии строк (кортежи), ставшие таковыми в результате
+ UPDATE или DELETE. Освобождает место для повторного использования. Не уменьшает
+ физический размер файла таблицы.
+
+ Полная очистка (VACUUM FULL): Перезаписывает файл таблицы, полностью удаляя мертвые
+ кортежи и уплотняя данные. Уменьшает физический размер файла, но требует эксклюзивной
+ блокировки.
+
+ Автоочистка (AUTOVACUUM): Фоновый процесс, автоматически выполняющий VACUUM для
+ таблиц по мере накопления мертвых кортежей.
+ HOT-обновления (Heap-Only Tuple): Специальный вид UPDATE, при котором новая версия
+ строки помещается на ту же страницу, что и старая. Это позволяет избежать обновления
+ индексов и повышает производительность.
+
+ Заморозка (FREEZE): Помечает версии строк как "замороженные", что позволяет предотвратить
+ проблему оборачивания идентификаторов транзакций (XID)
+
+Модуль 1: Ручная очистка и ее влияние
+ 1. Отключение автоочистки: Глобально отключите процесс автоочистки (autovacuum = off в
+ конфиге, требует перезагрузки, или ALTER SYSTEM + pg_reload_conf()). Убедитесь, что он не
+ работает.
+student:~$ sudo -u postgres psql -d postgres
+
+postgres=# ALTER SYSTEM SET autovacuum TO off;
+ALTER SYSTEM
+postgres=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+postgres=# SHOW autovacuum;
+ autovacuum 
+------------
+ off
+(1 row)
+
+ 2. Подготовка данных: В новой базе данных создайте таблицу vacuum_test (id INT) и индекс по
+ полю id. Вставьте в таблицу 100 000 случайных чисел.
+student:~$ createdb lab_vacuum
+sudo -u postgres psql -d lab_vacuum -c "
+CREATE TABLE vacuum_test (id INT);
+CREATE INDEX vacuum_test_id_idx ON vacuum_test(id);
+INSERT INTO vacuum_test
+SELECT (random()*100000)::INT FROM generate_series(1,100000);
+"
+CREATE TABLE
+CREATE INDEX
+INSERT 0 100000
+
+ 3. Наблюдение без очистки:
+ Несколько раз (3-5) обновите половину строк в таблице (UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;).
+ После каждого обновления контролируйте размер таблицы и индекса с помощью pg_total_relation_size.
+ Зафиксируйте рост размеров.
+student:~$ sudo -u postgres psql -d lab_vacuum
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 50144
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 9040 kB    | 3696 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 49788
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 12 MB      | 4680 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 50017
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 13 MB      | 4712 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 49918
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 15 MB      | 4904 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 49905
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 17 MB      | 5432 kB
+(1 row)
+
+ 4. Полная очистка: Выполните VACUUM FULL vacuum_test;. Сравните размеры таблицы и индекса до и после.
+lab_vacuum=# VACUUM FULL vacuum_test;
+VACUUM
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 17 MB      | 4696 kB
+(1 row)
+
+
+ 5. Обычная очистка:
+ Повторите цикл обновлений из пункта 3, но после каждого обновления вызывайте обычную очистку (VACUUM vacuum_test;).
+ Сравните динамику размеров с результатами из пункта 3.
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 50001
+lab_vacuum=# VACUUM vacuum_test;
+VACUUM
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 19 MB      | 5072 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 50149
+lab_vacuum=# VACUUM vacuum_test;
+VACUUM
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 21 MB      | 5432 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 49979
+lab_vacuum=# VACUUM vacuum_test;
+VACUUM
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 23 MB      | 5784 kB
+(1 row)
+
+lab_vacuum=# UPDATE vacuum_test SET id = id + 1 WHERE random() < 0.5;
+UPDATE 49972
+lab_vacuum=# VACUUM vacuum_test;
+VACUUM
+lab_vacuum=# SELECT pg_size_pretty(pg_total_relation_size('vacuum_test')) AS table_size,pg_size_pretty(pg_total_relation_size('vacuum_test_id_idx')) AS index_size;
+ table_size | index_size 
+------------+------------
+ 25 MB      | 6120 kB
+(1 row)
+
+рост будет меньше, чем без VACUUM, но больше, чем при VACUUM FULL
+
+ 6. Включение автоочистки: Включите автоочистку обратно.
+lab_vacuum=# ALTER SYSTEM SET autovacuum TO on;
+ALTER SYSTEM
+lab_vacuum=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+lab_vacuum=# SHOW autovacuum;
+ autovacuum 
+------------
+ on
+(1 row)
+
+Модуль 2: HOT-обновления и самоочистка
+ 1. Самоочистка без HOT:
+ Создайте таблицу без индексов. Вставьте данные.
+ Выполните несколько обновлений, не удовлетворяющих условиям HOT (например, изменяя поле, по которому потом создадите индекс).
+ С помощью pageinspect проанализируйте табличную страницу до и после обновлений и последующей самоочистки. Следите за появлением и исчезновением мертвых кортежей.
+lab_vacuum=# CREATE TABLE hotless_test (id INT, data TEXT);
+CREATE TABLE
+lab_vacuum=# INSERT INTO hotless_test
+lab_vacuum-# SELECT g, 'abc' FROM generate_series(1,100) g;
+INSERT 0 100
+lab_vacuum=# UPDATE hotless_test SET id = id + 1;
+UPDATE 100
+lab_vacuum=# CREATE EXTENSION IF NOT EXISTS pageinspect;
+CREATE EXTENSION
+lab_vacuum=# SELECT * FROM heap_page_items(get_raw_page('hotless_test',0));
+ lp  | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_field3 | t_ctid  | t_infomask2 | t_infomask | t_hoff | t_bits | t_oid |       t_data       
+-----+--------+----------+--------+--------+--------+----------+---------+-------------+------------+--------+--------+-------+--------------------
+   1 |    101 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   2 |    102 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   3 |    103 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   4 |    104 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   5 |    105 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   6 |    106 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   7 |    107 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   8 |    108 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+   9 |    109 |        2 |      0 |        |        |          |         |             |            |        |        |       | 
+  10 |    110 |        2 |      0 |        |        |          |         |  
+
+lab_vacuum=# VACUUM hotless_test;
+VACUUM
+lab_vacuum=# SELECT * FROM heap_page_items(get_raw_page('hotless_test',0));
+ lp | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_field3 | t_ctid | t_infomask2 | t_infomask | t_hoff | t_bits | t_oid |       t_data       
+----+--------+----------+--------+--------+--------+----------+--------+-------------+------------+--------+--------+-------+--------------------
+  1 |     53 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  2 |     54 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  3 |     55 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  4 |     56 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  5 |     57 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  6 |     58 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  7 |     59 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  8 |     60 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+  9 |     61 |        2 |      0 |        |        |          |        |             |            |        |        |       | 
+ 10 |     62 |        2 |      0 |        |        |          |        |  
+
+ 2. HOT-обновление:
+ Создайте таблицу hot_test и индекс по одному из полей.
+ Вставьте строку. Выполните обновление, которое удовлетворяет условиям HOT (изменение поля, не входящего в индекс, и наличие свободного места на странице).
+ С помощью pageinspect убедитесь, что новая версия строки находится на той же странице, а запись в индексе не изменилась.
+lab_vacuum=# CREATE TABLE hot_test (id INT, data TEXT);
+CREATE TABLE
+lab_vacuum=# CREATE INDEX hot_idx ON hot_test(id);
+CREATE INDEX
+lab_vacuum=# INSERT INTO hot_test VALUES (1,'first');
+INSERT 0 1
+lab_vacuum=# UPDATE hot_test SET data = 'second' WHERE id=1;
+UPDATE 1
+lab_vacuum=# SELECT * FROM heap_page_items(get_raw_page('hot_test',0));
+ lp | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_field3 | t_ctid | t_infomask2 | t_infomask | t_hoff | t_bits | t_oid |          t_data          
+----+--------+----------+--------+--------+--------+----------+--------+-------------+------------+--------+--------+-------+--------------------------
+  1 |   8152 |        1 |     34 |    854 |    855 |        0 | (0,2)  |       16386 |        258 |     24 |        |       | \x010000000d6669727374
+  2 |   8112 |        1 |     35 |    855 |      0 |        0 | (0,2)  |       32770 |      10242 |     24 |        |       | \x010000000f7365636f6e64
+(2 rows)
+
+
+ 3. HOT-обновление с переносом:
+ Воспроизведите ситуацию, когда на странице недостаточно места для нового HOT
+обновления.
+ Выполните обновление. Убедитесь с помощью pageinspect, что новая версия создалась на
+ другой странице.
+ Проверьте, сколько записей теперь ссылается на этот кортеж в индексе. Объясните
+ результат.
+lab_vacuum=# INSERT INTO hot_test SELECT g, repeat('x',2000) FROM generate_series(2,1000) g;
+INSERT 0 999
+lab_vacuum=# UPDATE hot_test SET data='overflow' WHERE id=1;
+UPDATE 1
+lab_vacuum=# SELECT * FROM heap_page_items(get_raw_page('hot_test',0));
+lp | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_field3 | t_ctid | t_infomask2 | t_infomask | t_hoff | t_bits | t_oid |                                              
+
+
+Новая версия ушла на другую страницу. Индекс теперь содержит несколько ссылок
+
+ Модуль 3: Глубокая очистка и параметры
+ 1. Многопроходная очистка индекса:
+ Создайте большую таблицу с индексом.
+lab_vacuum=# ALTER SYSTEM SET maintenance_work_mem = '2048kB';
+ALTER SYSTEM
+lab_vacuum=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+ Временно уменьшите параметр maintenance_work_mem до очень маленького значения.
+ Сгенерируйте большое количество мертвых кортежей (много UPDATE/DELETE).
+lab_vacuum=# CREATE TABLE big_vacuum (id INT);
+CREATE TABLE
+lab_vacuum=# CREATE INDEX big_idx ON big_vacuum(id);
+CREATE INDEX
+lab_vacuum=# INSERT INTO big_vacuum SELECT g FROM generate_series(1,200000) g;
+INSERT 0 200000
+lab_vacuum=# UPDATE big_vacuum SET id = id+1;
+UPDATE 200000
+lab_vacuum=# DELETE FROM big_vacuum WHERE id % 5 = 0;
+DELETE 40000
+lab_vacuum=# UPDATE big_vacuum SET id = id+1;
+UPDATE 160000
+lab_vacuum=# UPDATE big_vacuum SET id = id+1;
+UPDATE 160000
+lab_vacuum=# DELETE FROM big_vacuum WHERE id % 5 = 0;
+DELETE 40000
+lab_vacuum=# UPDATE big_vacuum SET id = id+1;
+UPDATE 120000
+lab_vacuum=# DELETE FROM big_vacuum WHERE id % 5 = 0;
+DELETE 40000
+lab_vacuum=# UPDATE big_vacuum SET id = id+1;
+UPDATE 80000
+lab_vacuum=# DELETE FROM big_vacuum WHERE id % 5 = 0;
+DELETE 40000
+
+
+Запустите VACUUM VERBOSE vacuum_test;. Проконтролируйте в выводе, что очистка индекса потребовала нескольких проходов.
+lab_vacuum=# VACUUM VERBOSE big_vacuum;
+INFO:  vacuuming "lab_vacuum.public.big_vacuum"
+INFO:  finished vacuuming "lab_vacuum.public.big_vacuum": index scans: 2
+pages: 0 removed, 3009 remain, 3009 scanned (100.00% of total)
+tuples: 640000 removed, 40000 remain, 0 are dead but not yet removable
+removable cutoff: 874, which was 0 XIDs old when operation ended
+new relfrozenxid: 872, which is 9 XIDs ahead of previous value
+frozen: 0 pages from table (0.00% of total) had 0 tuples frozen
+index scan needed: 3009 pages from table (100.00% of total) had 640000 dead item identifiers removed
+index "big_idx": pages: 1647 in total, 0 newly deleted, 0 currently deleted, 0 reusable
+avg read rate: 0.000 MB/s, avg write rate: 29.186 MB/s
+buffer usage: 12337 hits, 0 misses, 495 dirtied
+WAL usage: 12307 records, 1401 full page images, 5293523 bytes
+system usage: CPU: user: 0.04 s, system: 0.08 s, elapsed: 0.13 s
+VACUUM
+
+В выводе  видно что index scans больше 1, значит было больше 1 прохода
+
+ 2. Обычная очистка после удаления:
+ Удалите 90% случайных строк из большой таблицы.
+ Выполните обычную очистку (VACUUM). Проверьте, изменился ли физический размер
+ таблицы на диске.
+lab_vacuum=# DELETE FROM big_vacuum WHERE id % 2 = 0;
+DELETE 20000
+lab_vacuum=# VACUUM big_vacuum;
+VACUUM
+Размер таблицы не уменьшится, т.к. обычный VACUUM только помечает место как свободное.
+
+ 3. Полная очистка после удаления:
+ Повторите удаление 90% строк.
+ Выполните полную очистку (VACUUM FULL). Сравните результат с предыдущим пунктом.
+lab_vacuum=# VACUUM FULL big_vacuum;
+VACUUM
+
+Теперь таблица реально уменьшается на диске.
+
+ Модуль 4: Автоочистка и заморозка
+ 1. Настройка автоочистки: Настройте автоочистку для тестовой таблицы на запуск при изменении
+ 10% строк (autovacuum_vacuum_scale_factor = 0.1). Установите время сна автоочистки в 1
+ секунду (autovacuum_naptime = 1s).
+lab_vacuum=# ALTER TABLE vacuum_test SET (
+  autovacuum_vacuum_scale_factor = 0.1,
+  autovacuum_enabled = on
+);
+ALTER TABLE
+lab_vacuum=# ALTER SYSTEM SET autovacuum_naptime = '1s';
+ALTER SYSTEM
+lab_vacuum=# ALTER SYSTEM SET log_autovacuum_min_duration = 0;
+ALTER SYSTEM
+lab_vacuum=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+ 2. Нагрузочный тест:
+ Создайте таблицу с большим количеством строк (напр., 100k).
+ В цикле (20 итераций) с интервалом в несколько секунд изменяйте по 5-6% случайных
+ строк. Каждое изменение — отдельная транзакция.
+ Мониторьте логи автоочистки (log_autovacuum_min_duration = 0). Сколько раз она
+ сработала?
+
+lab_vacuum=# DO $$
+BEGIN
+  FOR i IN 1..20 LOOP
+    UPDATE vacuum_test SET id=id+1 WHERE random() < 0.06;
+    PERFORM pg_sleep(2);
+  END LOOP;
+END$$;
+DO
+
+В логах PostgreSQL видно срабатывание автоочистки.
+
+
+ 3. Заморозка версий:
+ Убедитесь с помощью pageinspect, что команда COPY ... WITH FREEZE загружает строки
+ с уже замороженными версиями (поле xmin специального значения).
+ Убедитесь, что эти строки видны даже в транзакции с уровнем Repeatable Read, начатой
+ до загрузки.
+
+lab_vacuum=# BEGIN;
+BEGIN
+lab_vacuum=*# DROP TABLE IF EXISTS freeze_test;
+DROP TABLE
+lab_vacuum=*# CREATE TABLE freeze_test (id INT);
+CREATE TABLE
+lab_vacuum=*# COPY freeze_test FROM PROGRAM 'seq 1 10' WITH (FREEZE);
+COPY 10
+lab_vacuum=*# COMMIT;
+COMMIT
+lab_vacuum=# SELECT * FROM heap_page_items(get_raw_page('freeze_test',0));
+
+ lp | lp_off | lp_flags | lp_len | t_xmin | t_xmax | t_field3 | t_ctid | t_infomask2 | t_infomask | t_hoff | t_bits | t_oid |   t_data   
+----+--------+----------+--------+--------+--------+----------+--------+-------------+------------+--------+--------+-------+------------
+  1 |   8160 |        1 |     28 |    884 |      0 |        4 | (0,1)  |           1 |       2816 |     24 |        |       | \x01000000
+  2 |   8128 |        1 |     28 |    884 |      0 |        4 | (0,2)  |           1 |       2816 |     24 |        |       | \x02000000
+  3 |   8096 |        1 |     28 |    884 |      0 |        4 | (0,3)  |           1 |       2816 |     24 |        |       | \x03000000
+  4 |   8064 |        1 |     28 |    884 |      0 |        4 | (0,4)  |           1 |       2816 |     24 |        |       | \x04000000
+  5 |   8032 |        1 |     28 |    884 |      0 |        4 | (0,5)  |           1 |       2816 |     24 |        |       | \x05000000
+  6 |   8000 |        1 |     28 |    884 |      0 |        4 | (0,6)  |           1 |       2816 |     24 |        |       | \x06000000
+  7 |   7968 |        1 |     28 |    884 |      0 |        4 | (0,7)  |           1 |       2816 |     24 |        |       | \x07000000
+  8 |   7936 |        1 |     28 |    884 |      0 |        4 | (0,8)  |           1 |       2816 |     24 |        |       | \x08000000
+  9 |   7904 |        1 |     28 |    884 |      0 |        4 | (0,9)  |           1 |       2816 |     24 |        |       | \x09000000
+ 10 |   7872 |        1 |     28 |    884 |      0 |        4 | (0,10) |           1 |       2816 |     24 |        |       | \x0a000000
+(10 rows)
+
+Даже если транзакция началась до COPY строки будут видны.
+
+ 4. Принудительная очистка заморозки:
+ Уменьшите параметр autovacuum_freeze_max_age до минимально возможного.
+ Отключите автоочистку для таблицы.
+ Выполните большое количество транзакций (например, с помощью скрипта), чтобы
+ превысить лимит autovacuum_freeze_max_age.
+ Выполните ручной VACUUM таблицы. Должна запуститься агрессивная очистка с заморозкой.
+ Проверьте логи.
+
+lab_vacuum=# ALTER SYSTEM SET autovacuum_freeze_max_age = 1000;
+ERROR:  1000 is outside the valid range for parameter "autovacuum_freeze_max_age" (100000 .. 2000000000)
+lab_vacuum=# SELECT pg_reload_conf();
+ pg_reload_conf 
+----------------
+ t
+(1 row)
+
+lab_vacuum=# ALTER TABLE freeze_test SET (autovacuum_enabled = off);
+ALTER TABLE
+lab_vacuum=# DO $$
+BEGIN
+  FOR i IN 1..2000 LOOP
+    PERFORM txid_current();
+  END LOOP;
+END$$;
+DO
+
+lab_vacuum=# VACUUM VERBOSE freeze_test;
+INFO:  vacuuming "lab_vacuum.public.freeze_test"
+INFO:  finished vacuuming "lab_vacuum.public.freeze_test": index scans: 0
+pages: 0 removed, 1 remain, 1 scanned (100.00% of total)
+tuples: 0 removed, 10 remain, 0 are dead but not yet removable
+removable cutoff: 887, which was 0 XIDs old when operation ended
+new relfrozenxid: 887, which is 94 XIDs ahead of previous value
+frozen: 0 pages from table (0.00% of total) had 0 tuples frozen
+index scan not needed: 0 pages from table (0.00% of total) had 0 dead item identifiers removed
+avg read rate: 0.000 MB/s, avg write rate: 21.360 MB/s
+buffer usage: 10 hits, 0 misses, 4 dirtied
+WAL usage: 4 records, 4 full page images, 28056 bytes
+system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+VACUUM
+lab_vacuum=# 
+
+
+В логах видно что aggressive vacuum с заморозкой.
