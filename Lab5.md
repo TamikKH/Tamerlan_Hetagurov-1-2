@@ -343,8 +343,8 @@ postgres=# SELECT '0/2C91E820'::pg_lsn - '0/2C6B3B90'::pg_lsn AS wal_bytes;
  Изучите влияние параметра wal_compression (вкл./выкл.) на объем WAL.
  Проведите тест, аналогичный п.1, с включенным и выключенным сжатием.
  Определите, во сколько раз уменьшается размер WAL-записей при использовании сжатия.
-Тест 1:
 
+Тест 1:
 student:~$ sudo -u postgres sed -i "s/^#*wal_compression.*/wal_compression = off/" \
   /etc/postgresql/16/main/postgresql.conf
 student:~$ sudo systemctl restart postgresql
