@@ -28,7 +28,7 @@
  n_live_tup, n_dead_tup). Сопоставьте с действиями.
  Выполните VACUUM. Снова проверьте статистику. Объясните изменения.
 
-'''posgresql
+'''sql
 monitor=# CREATE TABLE monitor_test (id INT);
 CREATE TABLE
 monitor=# INSERT INTO monitor_test VALUES (1), (2), (3);
