@@ -51,7 +51,7 @@ n_tup_del = 3 (удалили 3 строки)
 n_live_tup = 0 (живых строк нет)
 n_dead_tup > 0 (остались «мёртвые» версии строк).
 
-'''posgresql
+```posgresql
 monitor=# VACUUM monitor_test;
 VACUUM
 monitor=# SELECT n_tup_ins, n_tup_del, n_live_tup, n_dead_tup
@@ -61,8 +61,7 @@ WHERE relname = 'monitor_test';
 -----------+-----------+------------+------------
          3 |         3 |          0 |          0
 (1 row)
-
-'''
+```
 
 n_dead_tup стало равным нулю так как мертвые строки были перезаписаны
 
