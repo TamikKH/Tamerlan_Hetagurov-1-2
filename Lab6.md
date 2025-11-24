@@ -28,7 +28,7 @@
  n_live_tup, n_dead_tup). Сопоставьте с действиями.
  Выполните VACUUM. Снова проверьте статистику. Объясните изменения.
 
-'''sql
+```sql
 monitor=# CREATE TABLE monitor_test (id INT);
 CREATE TABLE
 monitor=# INSERT INTO monitor_test VALUES (1), (2), (3);
@@ -44,7 +44,7 @@ WHERE relname = 'monitor_test';
 -----------+-----------+------------+------------
          3 |         3 |          0 |          3
 (1 row)
-'''
+```
 
 n_tup_ins = 3 (вставили 3 строки)
 n_tup_del = 3 (удалили 3 строки)
