@@ -12,18 +12,18 @@
 
 # Теоретическая часть (краткое содержание):
 
-# Блокировки: 
+## Блокировки: 
  Механизм, обеспечивающий согласованность данных при параллельном доступе.
  Бывают разных уровней: объекты, строки, буферы в памяти.
-# Мониторинг: 
+## Мониторинг: 
  Набор представлений и функций для отслеживания активности сервера, статистики
  использования объектов и блокировок.
-# Взаимоблокировка (Deadlock): 
+## Взаимоблокировка (Deadlock): 
  Ситуация, когда две или более транзакции ожидают друг друга,
  освобождения ресурсов.
 
-Модуль 1: Мониторинг активности
-1. Статистика таблиц:
+# Модуль 1: Мониторинг активности
+##1. Статистика таблиц:
  В новой базе данных создайте таблицу monitor_test (id INT). Вставьте несколько строк,
  затем удалите все.
  Изучите статистику обращений к таблице в pg_stat_all_tables (n_tup_ins, n_tup_del,
@@ -68,56 +68,58 @@ WHERE relname = 'monitor_test';
 n_dead_tup стало равным нулю так как мертвые строки были перезаписаны
 
 
-2. Взаимоблокировка:
+## 2. Взаимоблокировка:
  Создайте ситуацию взаимоблокировки двух транзакций (например, изменение двух строк в
  разном порядке).
  Изучите, какая информация записывается в журнал сообщений сервера при обнаружении
  взаимоблокировки.
 Сессия 1:
-'''posgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id = 1 WHERE id = 1;
 UPDATE 0
-'''
+```
 
 Сессия 2:
-'''posgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id = 2 WHERE id = 2;
 UPDATE 0
 monitor=*# UPDATE monitor_test SET id = 1 WHERE id = 1;
 UPDATE 0
-'''
+```
 
 Сессия 1:
-'''posgresql
+```posgresql
 monitor=*# UPDATE monitor_test SET id = 2 WHERE id = 2;
 UPDATE 0
-'''
+```
 
 В логах /var/log/postgresql/postgresql-16-main.log появилось:
+```bash
 ERROR:  deadlock detected
 DETAIL:  Process 1743 waits for ShareLock on transaction 253; 
          blocked by process 1532.
          Process 1532 waits for ShareLock on transaction 143;
          blocked by process 1743.
 HINT:  See server log for query details.
+```
 
-3. Расширение pg_stat_statements (Практика+):
+## 3. Расширение pg_stat_statements (Практика+):
  Установите и настройте расширение pg_stat_statements.
  Выполните несколько произвольных запросов.
  Изучите информацию в представлении pg_stat_statements (топ запросов, время
  выполнения и т.д.).
 
-Модуль 2: Блокировки объектов
-1. Блокировки при чтении:
- На уровне изоляции Read Committed прочитайте одну строку таблицы по первичному
+# Модуль 2: Блокировки объектов
+## 1. Блокировки при чтении:
+На уровне изоляции Read Committed прочитайте одну строку таблицы по первичному
  ключу.
  Изучите удерживаемые блокировки в pg_locks. Объясните, какие блокировки и почему
  были захвачены
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# SELECT * FROM monitor_test WHERE id = 1;
@@ -134,14 +136,15 @@ WHERE pid = pg_backend_pid();
  relation   | AccessShareLock | t
  virtualxid | ExclusiveLock   | t
 (3 rows)
-'''
+```
+
 Отображается AccessShareLock потому что SELECT блокирует таблицу «на чтение», не мешая UPDATE/INSERT.
 
-2. Повышение уровня блокировок:
- Воспроизведите ситуацию автоматического повышения уровня предикатных блокировок
- при чтении строк по индексу.
- Покажите, что это может привести к ложной ошибке сериализации.
-'''postgresql
+## 2. Повышение уровня блокировок:
+Воспроизведите ситуацию автоматического повышения уровня предикатных блокировок
+при чтении строк по индексу.
+Покажите, что это может привести к ложной ошибке сериализации.
+```posgresql
 monitor=# SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 WARNING:  SET TRANSACTION can only be used in transaction blocks
 SET
@@ -149,25 +152,25 @@ monitor=# SELECT * FROM monitor_test WHERE id > 0;
  id 
 ----
 (0 rows)
-'''
+```
 
-3. Логирование долгих ожиданий:
+## 3. Логирование долгих ожиданий:
  Настройте запись в журнал сообщений о ожиданиях блокировок > 100 мс (log_lock_waits = on, deadlock_timeout = 100ms).
  Создайте ситуацию длительного ожидания блокировки. Убедитесь, что сообщение
  появилось в логе.
 Сессия 1:
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id=1 WHERE id=1;
 UPDATE 0
-'''
+```
 
 Сессия 2:
-'''postgresql
+```posgresql
 monitor=# UPDATE monitor_test SET id=1 WHERE id=1;
 UPDATE 0
-'''
+```
 Запись в логе:
 LOG: process 2531 still waiting for ShareLock on transaction 3526
 
