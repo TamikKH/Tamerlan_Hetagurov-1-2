@@ -23,7 +23,7 @@
  освобождения ресурсов.
 
 # Модуль 1: Мониторинг активности
-##1. Статистика таблиц:
+## 1. Статистика таблиц:
  В новой базе данных создайте таблицу monitor_test (id INT). Вставьте несколько строк,
  затем удалите все.
  Изучите статистику обращений к таблице в pg_stat_all_tables (n_tup_ins, n_tup_del,
@@ -174,144 +174,144 @@ UPDATE 0
 Запись в логе:
 LOG: process 2531 still waiting for ShareLock on transaction 3526
 
-Модуль 3: Блокировки строк
-1. Конфликт обновлений:
+# Модуль 3: Блокировки строк
+## 1. Конфликт обновлений:
  Смоделируйте ситуацию обновления одной и той же строки тремя командами UPDATE в
  разных сеансах.
  Изучите возникшие блокировки в pg_locks. Объясните их тип и назначение.
 
 Сессия 1:
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id=1 WHERE id=1;
 UPDATE 0
-'''
+```
 
 Сессия 2:
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id=2 WHERE id=1;
 UPDATE 0
-'''
+```
 
 Сессия 3:
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE monitor_test SET id=3 WHERE id=1;
 UPDATE 0
-'''
+```
 
 В pg_locks tuple lock удерживает доступ к конкретной строке.
 
-2. Взаимоблокировка трех транзакций:
+## 2. Взаимоблокировка трех транзакций:
  Воспроизведите взаимоблокировку трех транзакций.
  Проанализируйте журнал сообщений сервера. Можно ли по нему понять причину
  взаимоблокировки?
 
 Сессия 1
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 1;
 UPDATE 1
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 2;
-'''
+```
 
 Сессия 2
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 2;
 UPDATE 1
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 3;
-'''
+```
 
 Сессия 3
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 3;
 UPDATE 1
 monitor=*# UPDATE deadlock3 SET val = val + 1 WHERE id = 1;
-'''
+```
 
 PostgreSQL обнаруживает deadlock и отменяет одну из транзакций.
 Сессия 3:
-'''postgresql
+```bash
 ERROR:  deadlock detected
 DETAIL:  Process 48469 waits for ShareLock on transaction 37144; blocked by process 48097.
 Process 48097 waits for ShareLock on transaction 37145; blocked by process 48460.
 Process 48460 waits for ShareLock on transaction 37146; blocked by process 48469.
 HINT:  See server log for query details.
 CONTEXT:  while updating tuple (0,1) in relation "deadlock3"
-'''
+```
 
 Логи покажут deadlock, но в тексте не всегда сразу видно причину — нужно анализировать порядок блокировок.
 
-3. Взаимоблокировка UPDATE:
+## 3. Взаимоблокировка UPDATE:
  Попытайтесь воспроизвести ситуацию, когда две транзакции, выполняющие по одному
  UPDATE на одной таблице, взаимоблокируются. Объясните, возможно ли это.
 
 Сессия 1
-'''postgresql
+```posgresql
 monitor=# INSERT INTO deadlock_update VALUES (1, 10), (2, 20);
 INSERT 0 2
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE deadlock_update SET val = val + 1 WHERE id = 1;
 UPDATE 1
-'''
+```
 
 Сессия 2
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# UPDATE deadlock_update SET val = val + 1 WHERE id = 2;
 UPDATE 1
-'''
+```
 
 В этом случае deadlock не возникает, потому что транзакции блокируют разные строки. 
 PostgreSQL просто ставит row-level lock на обновляемую строку
 
-Модуль 4: Блокировки в оперативной памяти
-1. Закрепление буферов курсором:
+# Модуль 4: Блокировки в оперативной памяти
+## 1. Закрепление буферов курсором:
  Используя pg_buffercache, убедитесь, что открытый курсор удерживает закрепление
  буфера (pinning) для быстрого чтения следующей строки.
 
-'''postgresql
+```posgresql
 monitor=# BEGIN;
 BEGIN
 monitor=*# DECLARE c CURSOR FOR SELECT * FROM monitor_test;
 DECLARE CURSOR
-'''
+```
 В pg_buffercache видно, что страницы удерживаются (pinning).
 
-2. VACUUM и закрепление буферов:
+## 2. VACUUM и закрепление буферов:
  Откройте курсор на таблице. Не закрывая его, выполните VACUUM этой таблицы.
  Определите, будет ли VACUUM ожидать освобождения закрепления буфера.
-'''postgresql
+```posgresql
 monitor=# VACUUM monitor_test;
 VACUUM
-'''
+```
 
 VACUUM не блокируется, если страницы не нужны для удаления старых версий.
 
-3. VACUUM FREEZE и ожидание:
+## 3. VACUUM FREEZE и ожидание:
  Повторите эксперимент с VACUUM FREEZE.
  Убедитесь, что в профиле ожиданий процесса VACUUM появилось ожидание снятия
  закрепления буфера (buffer pin).
 
-'''postgresql
+```posgresql
 monitor=# SET log_lock_waits = on;
 SET
 monitor=# SET deadlock_timeout = '100ms';
 SET
 monitor=# VACUUM FREEZE monitor_test;
 VACUUM
-'''
+```
 
 Результаты выполнения 
 Сводная таблица результатов 
