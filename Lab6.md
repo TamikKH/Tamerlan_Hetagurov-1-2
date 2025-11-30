@@ -172,7 +172,9 @@ monitor=# UPDATE monitor_test SET id=1 WHERE id=1;
 UPDATE 0
 ```
 Запись в логе:
+```bash
 LOG: process 2531 still waiting for ShareLock on transaction 3526
+```
 
 # Модуль 3: Блокировки строк
 ## 1. Конфликт обновлений:
