@@ -31,26 +31,14 @@ PostgreSQL.
 разных портах или в разных каталогах) в синхронном режиме. Проверил работу репликации (вставка данных на мастере, проверка на реплике). Убедителся, что при остановленной реплике фиксация транзакций на мастере не завершается (в синхронном режиме).
 ```sql
 -- Создаем пользователя для репликации
-CREATE USER areg WITH REPLICATION LOGIN PASSWORD 'areg';
-```
-```sql
+CREATE USER tamik WITH REPLICATION LOGIN PASSWORD 'tamik';
 -- Проверяем создание пользователя
-\du areg
-```
-```sql
+\du tamik
 -- Настройка postgresql.conf
 ALTER SYSTEM SET wal_level = replica;
-```
-```sql
 ALTER SYSTEM SET max_wal_senders = 10;
-```
-```sql
 ALTER SYSTEM SET max_replication_slots = 10;
-```
-```sql
 ALTER SYSTEM SET synchronous_standby_names = 'replica1';
-```
-```sql
 SELECT pg_reload_conf();
 ```
 ```sql
