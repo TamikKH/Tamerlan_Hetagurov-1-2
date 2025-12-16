@@ -40,15 +40,11 @@ ALTER SYSTEM SET max_wal_senders = 10;
 ALTER SYSTEM SET max_replication_slots = 10;
 ALTER SYSTEM SET synchronous_standby_names = 'replica1';
 SELECT pg_reload_conf();
-```
-```sql
 -- Проверяем настройки
 SHOW wal_level;
-```
-```sql
 SHOW max_wal_senders;
 ```
----фрагмет вывода
+фрагмет вывода
 ```text
 CREATE ROLE
 Time: 0.005s
@@ -60,36 +56,24 @@ Role name  |                         Attributes
 (1 row)
 
 Time: 0.008s
-```
-```text
 ALTER SYSTEM
 Time: 0.004s
-```
-```text
 ALTER SYSTEM
 Time: 0.003s
-```
-```text
 ALTER SYSTEM
 Time: 0.003s
-```
-```text
 pg_reload_conf 
 ----------------
  t
 (1 row)
 
 Time: 0.008s
-```
-```text
 wal_level 
 -----------
  replica
 (1 row)
 
 Time: 0.005s
-```
-```text
  max_wal_senders 
 -----------------
  10
@@ -100,8 +84,6 @@ Time: 0.005s
 Создание слота репликации:
 ```sql
 SELECT pg_create_physical_replication_slot('replica_slot');
-```
-```sql
 -- Проверяем слот
 SELECT slot_name, slot_type, active FROM pg_replication_slots;
 ```
@@ -113,8 +95,6 @@ SELECT slot_name, slot_type, active FROM pg_replication_slots;
 (1 row)
 
 Time: 0.007s
-```
-```text
  slot_name   | slot_type | active 
 -------------+-----------+--------
  replica_slot| physical  | f
@@ -127,12 +107,8 @@ Time: 0.009s
 -- На мастере проверяем статус репликации
 SELECT application_name, state, sync_state, sync_priority 
 FROM pg_stat_replication;
-```
-```sql
 -- Проверяем режим мастера
 SELECT pg_is_in_recovery();
-```
-```sql
 -- На реплике проверяем статус
 SELECT pg_is_in_recovery();
 ```
@@ -144,16 +120,12 @@ SELECT pg_is_in_recovery();
 (1 row)
 
 Time: 0.012s
-```
-```text
  pg_is_in_recovery 
 -------------------
  f
 (1 row)
 
 Time: 0.005s
-```
-```text
  pg_is_in_recovery 
 -------------------
  t
@@ -165,11 +137,7 @@ Time: 0.006s
 ```sql
 -- На мастере создаем тестовые данные
 CREATE TABLE test_replication (id SERIAL PRIMARY KEY, data TEXT);
-```
-```sql
 INSERT INTO test_replication (data) VALUES ('test_data_1'), ('test_data_2');
-```
-```sql
 -- На реплике проверяем данные
 SELECT * FROM test_replication;
 ```
@@ -177,12 +145,8 @@ SELECT * FROM test_replication;
 ```text
 CREATE TABLE
 Time: 0.015s
-```
-```text
 INSERT 0 2
 Time: 0.004s
-```
-```text
  id |    data    
 ----+------------
   1 | test_data_1
@@ -199,25 +163,13 @@ Time: 0.008s
 ```sql
 -- На реплике проверяем текущие настройки
 SHOW max_standby_streaming_delay;
-```
-```sql
 SHOW hot_standby_feedback;
-```
-```sql
 -- Отключаем откладывание применения
 ALTER SYSTEM SET max_standby_streaming_delay = '-1';
-```
-```sql
 SELECT pg_reload_conf();
-```
-```sql
 -- Включаем обратную связь
 ALTER SYSTEM SET hot_standby_feedback = 'on';
-```
-```sql
 SELECT pg_reload_conf();
-```
-```sql
 SHOW hot_standby_feedback;
 ```
 --- фрагменты вывода
@@ -228,40 +180,28 @@ SHOW hot_standby_feedback;
 (1 row)
 
 Time: 0.005s
-```
-```text
  hot_standby_feedback 
 ----------------------
  off
 (1 row)
 
 Time: 0.005s
-```
-```text
 ALTER SYSTEM
 Time: 0.004s
-```
-```text
  pg_reload_conf 
 ----------------
  t
 (1 row)
 
 Time: 0.007s
-```
-```text
 ALTER SYSTEM
 Time: 0.003s
-```
-```text
  pg_reload_conf 
 ----------------
  t
 (1 row)
 
 Time: 0.007s
-```
-```text
  hot_standby_feedback 
 ----------------------
  on
@@ -275,12 +215,8 @@ Time: 0.005s
 ```sql
 -- Проверяем слот до остановки реплики
 SELECT slot_name, active, restart_lsn FROM pg_replication_slots;
-```
-```sql
 -- Удаляем слот репликации
 SELECT pg_drop_replication_slot('replica_slot');
-```
-```sql
 -- Проверяем очистку
 SELECT slot_name FROM pg_replication_slots;
 ```
@@ -292,16 +228,12 @@ SELECT slot_name FROM pg_replication_slots;
 (1 row)
 
 Time: 0.009s
-```
-```text
  pg_drop_replication_slot 
 --------------------------
  
 (1 row)
 
 Time: 0.006s
-```
-```text
  slot_name 
 -----------
 (0 rows)
@@ -314,40 +246,22 @@ Time: 0.008s
 ```sql
 -- Создаем базы данных
 CREATE DATABASE db1;
-```
-```sql
 CREATE DATABASE db2;
-```
-```sql
 -- В db1 создаем таблицу
 CREATE TABLE logical_test (id SERIAL PRIMARY KEY, name TEXT, value INTEGER);
-```
-```sql
 INSERT INTO logical_test (name, value) VALUES ('test1', 100), ('test2', 200);
-```
-```sql
 -- Настраиваем публикацию в db1
 CREATE PUBLICATION logical_pub FOR TABLE logical_test;
-```
-```sql
 -- В db2 создаем таблицу для подписки
 CREATE TABLE logical_test (id SERIAL PRIMARY KEY, name TEXT, value INTEGER);
-```
-```sql
 -- Настраиваем подписку в db2
 CREATE SUBSCRIPTION logical_sub 
 CONNECTION 'dbname=db1 host=localhost port=5432' 
 PUBLICATION logical_pub;
-```
-```sql
 -- Проверяем репликацию - добавляем данные в мастере
 INSERT INTO logical_test (name, value) VALUES ('test3', 300);
-```
-```sql
 -- Проверяем на подписчике
 SELECT * FROM logical_test;
-```
-```sql
 -- Удаляем подписку
 DROP SUBSCRIPTION logical_sub;
 ```
@@ -356,36 +270,20 @@ DROP SUBSCRIPTION logical_sub;
 ```text
 CREATE DATABASE
 Time: 0.025s
-```
-```text
 CREATE DATABASE
 Time: 0.022s
-```
-```text
 CREATE TABLE
 Time: 0.015s
-```
-```text
 INSERT 0 2
 Time: 0.004s
-```
-```text
 CREATE PUBLICATION
 Time: 0.008s
-```
-```text
 CREATE TABLE
 Time: 0.012s
-```
-```text
 CREATE SUBSCRIPTION
 Time: 1.234s
-```
-```text
 INSERT 0 1
 Time: 0.005s
-```
-```text
  id | name  | value 
 ----+-------+-------
   1 | test1 |   100
@@ -394,8 +292,6 @@ Time: 0.005s
 (3 rows)
 
 Time: 0.009s
-```
-```text
 DROP SUBSCRIPTION
 Time: 0.015s
 ```
@@ -405,16 +301,10 @@ Time: 0.015s
 ```sql
 -- Проверяем статус реплики перед переключением
 SELECT pg_is_in_recovery();
-```
-```sql
 -- Активируем реплику
 SELECT pg_promote();
-```
-```sql
 -- Проверяем статус после активации
 SELECT pg_is_in_recovery();
-```
-```sql
 -- Проверяем репликацию с нового мастера
 SELECT application_name, state FROM pg_stat_replication;
 ```
@@ -434,23 +324,17 @@ Time: 0.006s
 (1 row)
 
 Time: 0.008s
-```
-```text
  pg_is_in_recovery 
 -------------------
  f
 (1 row)
 
 Time: 0.006s
-```
-```text
  application_name | state 
 ------------------+-------
 (0 rows)
 
 Time: 0.010s
-```
-```text
  application_name | state 
 ------------------+-------
 (0 rows)
@@ -465,24 +349,18 @@ Time: 0.010s
 (1 row)
 
 Time: 0.006s
-```
-```text
  pg_promote 
 ------------
  t
 (1 row)
 
 Time: 0.008s
-```
-```text
  pg_is_in_recovery 
 -------------------
  f
 (1 row)
 
 Time: 0.006s
-```
-```text
  application_name | state 
 ------------------+-------
 (0 rows)
@@ -495,14 +373,8 @@ Time: 0.010s
 ```sql
 -- Изучаем текущие настройки репликации
 SHOW max_wal_senders;
-```
-```sql
 SHOW wal_keep_size;
-```
-```sql
 SHOW max_slot_wal_keep_size;
-```
-```sql
 -- Проверяем статистику репликации
 SELECT * FROM pg_stat_replication;
 ```
